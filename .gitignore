@@ -1,0 +1,12 @@
+# Secrets — never commit real credentials
+.env
+
+# Build output (root-level binaries only, not cmd/server sources)
+/bin/
+/gomiddle
+/server
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
