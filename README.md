@@ -1,16 +1,23 @@
 # gomiddle
 
-Go middleware server for factory equipment integration. Current scope: reads
-silo weights from a Modbus TCP PLC and serves them over an HTTP JSON API.
-Planned: Mitsubishi MC-protocol injection PLCs, Odoo ERP API, Oracle/PostgreSQL.
+Go middleware server for factory equipment integration. Current scope:
+
+- Silo weights from a Modbus TCP PLC (FC3 holding registers)
+- Injection-molding machine state from Mitsubishi Q06UDV PLCs
+  (MC Protocol frame 3E, binary mode — implemented from scratch in
+  `internal/mcproto`), including the D5000→D8000 flicker-heartbeat mirror
+
+Planned: Odoo ERP API integration, Oracle/PostgreSQL persistence.
 
 ## Project layout
 
 ```
-cmd/server/        Entry point (main.go) — wiring and lifecycle only
-internal/config/   Environment-variable configuration
-internal/silo/     Modbus TCP poller for the 6 silo weight registers
-internal/api/      HTTP server, routes, JSON responses
+cmd/server/          Entry point (main.go) — wiring and lifecycle only
+internal/config/     Environment-variable configuration
+internal/silo/       Modbus TCP poller for the 6 silo weight registers
+internal/mcproto/    Mitsubishi MC Protocol 3E (binary) client + ASCII codecs
+internal/injection/  Per-machine poller: heartbeat mirror + status snapshot
+internal/api/        HTTP server, routes, JSON responses
 ```
 
 `internal/` packages cannot be imported by other repositories — Go enforces
@@ -33,10 +40,11 @@ MOCK_PLC=true go run ./cmd/server
 
 ## API
 
-| Method | Path        | Description                                  |
-| ------ | ----------- | -------------------------------------------- |
-| GET    | /healthz    | Liveness check                               |
-| GET    | /api/silos  | Latest silo weights (503 if the PLC is down) |
+| Method | Path           | Description                                       |
+| ------ | -------------- | ------------------------------------------------- |
+| GET    | /healthz       | Liveness check                                    |
+| GET    | /api/silos     | Latest silo weights (503 if the PLC is down)      |
+| GET    | /api/injection | Injection machine states (503 if all are down)    |
 
 ```sh
 curl -s localhost:8080/api/silos | jq
@@ -59,9 +67,10 @@ Example response:
 Each holding register (FC3, addresses 0–5) is a signed 16-bit value;
 `value / 100` is the silo weight in tons. Negative values are possible.
 
-## Build
+## Build & test
 
 ```sh
 go build -o bin/server ./cmd/server
 go vet ./...
+go test ./...       # includes a fake MC-protocol PLC server (no hardware needed)
 ```

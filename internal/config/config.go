@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,8 +23,18 @@ type Config struct {
 	PollInterval     time.Duration // how often to read the PLC
 	PLCTimeout       time.Duration // per-request Modbus timeout
 
+	// Injection-molding PLCs (Mitsubishi MC Protocol 3E binary)
+	InjMachines     []Machine     // one entry per injection machine
+	InjPollInterval time.Duration // how often to poll each machine
+
 	// Development helper: serve fake silo data instead of contacting a PLC.
 	MockPLC bool
+}
+
+// Machine identifies one injection-molding machine.
+type Machine struct {
+	No   string // machine number, single digit "1"-"9" per the Odoo API spec
+	Addr string // host:port of the Mitsubishi PLC
 }
 
 // Load reads configuration from the environment, applying defaults for
@@ -65,7 +76,34 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
+	cfg.InjPollInterval, err = getEnvDuration("INJ_POLL_INTERVAL", 1*time.Second)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.InjMachines, err = parseMachines(getEnv("INJ_MACHINES", "1=10.10.41.21:3001,2=10.10.41.31:3001"))
+	if err != nil {
+		return cfg, err
+	}
+
 	return cfg, nil
+}
+
+// parseMachines parses "1=host:port,2=host:port" into Machine values.
+func parseMachines(s string) ([]Machine, error) {
+	var machines []Machine
+	for _, entry := range strings.Split(s, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		no, addr, ok := strings.Cut(entry, "=")
+		if !ok || no == "" || addr == "" {
+			return nil, fmt.Errorf("env INJ_MACHINES: bad entry %q, want no=host:port", entry)
+		}
+		machines = append(machines, Machine{No: no, Addr: addr})
+	}
+	return machines, nil
 }
 
 func getEnv(key, fallback string) string {

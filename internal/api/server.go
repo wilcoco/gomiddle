@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/wilcoco/gomiddle/internal/injection"
 	"github.com/wilcoco/gomiddle/internal/silo"
 )
 
 // New builds the HTTP server with all routes registered.
-func New(addr string, poller *silo.Poller, log *slog.Logger) *http.Server {
+func New(addr string, poller *silo.Poller, injPollers []*injection.Poller, log *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +28,23 @@ func New(addr string, poller *silo.Poller, log *slog.Logger) *http.Server {
 			status = http.StatusServiceUnavailable
 		}
 		writeJSON(w, status, snap)
+	})
+
+	mux.HandleFunc("GET /api/injection", func(w http.ResponseWriter, r *http.Request) {
+		snaps := make([]injection.Snapshot, 0, len(injPollers))
+		allDown := len(injPollers) > 0
+		for _, p := range injPollers {
+			snap := p.Snapshot()
+			snaps = append(snaps, snap)
+			if snap.Error == "" {
+				allDown = false
+			}
+		}
+		status := http.StatusOK
+		if allDown {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, snaps)
 	})
 
 	return &http.Server{

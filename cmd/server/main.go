@@ -14,6 +14,7 @@ import (
 
 	"github.com/wilcoco/gomiddle/internal/api"
 	"github.com/wilcoco/gomiddle/internal/config"
+	"github.com/wilcoco/gomiddle/internal/injection"
 	"github.com/wilcoco/gomiddle/internal/silo"
 )
 
@@ -34,7 +35,16 @@ func main() {
 	poller := silo.NewPoller(cfg, log)
 	go poller.Run(ctx)
 
-	srv := api.New(cfg.HTTPAddr, poller, log)
+	// One poller goroutine per injection machine — they run independently,
+	// so one machine being offline never blocks the other.
+	injPollers := make([]*injection.Poller, 0, len(cfg.InjMachines))
+	for _, m := range cfg.InjMachines {
+		p := injection.NewPoller(m, cfg, log)
+		injPollers = append(injPollers, p)
+		go p.Run(ctx)
+	}
+
+	srv := api.New(cfg.HTTPAddr, poller, injPollers, log)
 	go func() {
 		log.Info("http server listening", "addr", cfg.HTTPAddr, "mock_plc", cfg.MockPLC)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
