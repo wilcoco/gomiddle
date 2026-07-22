@@ -20,6 +20,7 @@ type Config struct {
 	SiloRegisterAddr uint16        // first holding register address
 	SiloCount        uint16        // number of silos (= number of registers)
 	SiloScale        float64       // divisor: raw register value / scale = tons
+	SiloChangeTons   float64       // forward a silo value only if it moved this many tons
 	PollInterval     time.Duration // how often to read the PLC
 	PLCTimeout       time.Duration // per-request Modbus timeout
 
@@ -65,6 +66,11 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 	cfg.SiloScale = float64(scale)
+
+	cfg.SiloChangeTons, err = getEnvFloat("SILO_CHANGE_TONS", 0.3)
+	if err != nil {
+		return cfg, err
+	}
 
 	cfg.PollInterval, err = getEnvDuration("POLL_INTERVAL", 2*time.Second)
 	if err != nil {
@@ -123,6 +129,18 @@ func getEnvInt(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("env %s: expected integer, got %q", key, v)
 	}
 	return n, nil
+}
+
+func getEnvFloat(key string, fallback float64) (float64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return 0, fmt.Errorf("env %s: expected number, got %q", key, v)
+	}
+	return f, nil
 }
 
 func getEnvDuration(key string, fallback time.Duration) (time.Duration, error) {

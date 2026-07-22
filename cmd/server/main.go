@@ -14,6 +14,7 @@ import (
 
 	"github.com/wilcoco/gomiddle/internal/api"
 	"github.com/wilcoco/gomiddle/internal/config"
+	"github.com/wilcoco/gomiddle/internal/forward"
 	"github.com/wilcoco/gomiddle/internal/injection"
 	"github.com/wilcoco/gomiddle/internal/silo"
 )
@@ -32,7 +33,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	poller := silo.NewPoller(cfg, log)
+	// The forward layer is the middleware's core: a change detector keeps only
+	// meaningful silo movements, and a sink persists them. LogSink is the
+	// development default; a PostgreSQL sink will replace it.
+	detector := forward.NewDetector(cfg.SiloChangeTons)
+	var sink forward.Sink = forward.LogSink{Log: log}
+
+	poller := silo.NewPoller(cfg, log, detector, sink)
 	go poller.Run(ctx)
 
 	// One poller goroutine per injection machine — they run independently,

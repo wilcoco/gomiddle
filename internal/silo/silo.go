@@ -4,6 +4,7 @@ package silo
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/goburrow/modbus"
 
 	"github.com/wilcoco/gomiddle/internal/config"
+	"github.com/wilcoco/gomiddle/internal/forward"
 )
 
 // Reading is the decoded weight of one silo.
@@ -30,15 +32,17 @@ type Snapshot struct {
 
 // Poller owns the Modbus connection and polls the PLC on a fixed interval.
 type Poller struct {
-	cfg config.Config
-	log *slog.Logger
+	cfg      config.Config
+	log      *slog.Logger
+	detector *forward.Detector
+	sink     forward.Sink
 
 	mu   sync.RWMutex
 	snap Snapshot
 }
 
-func NewPoller(cfg config.Config, log *slog.Logger) *Poller {
-	return &Poller{cfg: cfg, log: log}
+func NewPoller(cfg config.Config, log *slog.Logger, detector *forward.Detector, sink forward.Sink) *Poller {
+	return &Poller{cfg: cfg, log: log, detector: detector, sink: sink}
 }
 
 // Snapshot returns the latest poll result. Safe for concurrent use.
@@ -67,13 +71,30 @@ func (p *Poller) Run(ctx context.Context) {
 
 func (p *Poller) poll() {
 	readings, err := p.read()
+	now := time.Now()
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.snap = Snapshot{Readings: readings, UpdatedAt: time.Now()}
+	p.snap = Snapshot{Readings: readings, UpdatedAt: now}
 	if err != nil {
 		p.snap.Error = err.Error()
 		p.log.Error("silo poll failed", "err", err)
+	}
+	p.mu.Unlock()
+
+	if err != nil {
+		return
+	}
+	// Forward only the readings that changed meaningfully. Everything else
+	// is dropped here — this is the "significant values only" core.
+	for _, r := range readings {
+		key := fmt.Sprintf("silo-%d", r.Silo)
+		if !p.detector.Significant(forward.Sample{Key: key, Value: r.Tons}) {
+			continue
+		}
+		ev := forward.Event{Source: "silo", Key: key, Value: r.Tons, Raw: int(r.Raw), At: now}
+		if err := p.sink.Emit(context.Background(), ev); err != nil {
+			p.log.Error("silo sink emit failed", "key", key, "err", err)
+		}
 	}
 }
 
